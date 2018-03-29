@@ -7,8 +7,4 @@ import (
 
 func TestNewXID(t *testing.T) {
 	fmt.Println(NewXID())
-	fmt.Println(NewXID())
-	fmt.Println(NewXID())
-	fmt.Println(NewXID())
-	fmt.Println(NewXID())
 }

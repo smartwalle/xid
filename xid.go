@@ -1,33 +1,67 @@
 package xid
 
 import (
+	"bytes"
+	"crypto/md5"
+	"crypto/rand"
+	"database/sql/driver"
 	"encoding/binary"
 	"encoding/hex"
-	"crypto/md5"
-	"sync/atomic"
-	"fmt"
-	"os"
-	"io"
-	"crypto/rand"
-	"time"
-	"bytes"
 	"errors"
+	"fmt"
+	"io"
+	"os"
+	"sync/atomic"
+	"time"
 )
 
 // 从 mgo.bson 复制
-
-var objectIdCounter uint32 = 0
-var machineId = readMachineId()
-var nullBytes = []byte("null")
-
 type XID string
 
 func XIDHex(s string) XID {
 	d, err := hex.DecodeString(s)
 	if err != nil || len(d) != 12 {
-		panic(fmt.Sprintf("Invalid input to XIDHex: %q", s))
+		panic(fmt.Sprintf("invalid input to XIDHex: %q", s))
 	}
 	return XID(d)
+}
+
+func IsXIDHex(s string) bool {
+	if len(s) != 24 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+var idCounter = readRandomUint32()
+var machineId = readMachineId()
+var processId = os.Getpid()
+
+func readRandomUint32() uint32 {
+	var b [4]byte
+	_, err := io.ReadFull(rand.Reader, b[:])
+	if err != nil {
+		panic(fmt.Errorf("cannot read random xid: %v", err))
+	}
+	return uint32((uint32(b[0]) << 0) | (uint32(b[1]) << 8) | (uint32(b[2]) << 16) | (uint32(b[3]) << 24))
+}
+
+func readMachineId() []byte {
+	var sum [3]byte
+	id := sum[:]
+	hostname, err1 := os.Hostname()
+	if err1 != nil {
+		_, err2 := io.ReadFull(rand.Reader, id)
+		if err2 != nil {
+			panic(fmt.Errorf("cannot get hostname: %v; %v", err1, err2))
+		}
+		return id
+	}
+	hw := md5.New()
+	hw.Write([]byte(hostname))
+	copy(id, hw.Sum(nil))
+	return id
 }
 
 func NewXID() XID {
@@ -39,11 +73,10 @@ func NewXID() XID {
 	b[5] = machineId[1]
 	b[6] = machineId[2]
 	// Pid, 2 bytes, specs don't specify endianness, but we use big endian.
-	pid := os.Getpid()
-	b[7] = byte(pid >> 8)
-	b[8] = byte(pid)
+	b[7] = byte(processId >> 8)
+	b[8] = byte(processId)
 	// Increment, 3 bytes, big endian
-	i := atomic.AddUint32(&objectIdCounter, 1)
+	i := atomic.AddUint32(&idCounter, 1)
 	b[9] = byte(i >> 16)
 	b[10] = byte(i >> 8)
 	b[11] = byte(i)
@@ -56,16 +89,8 @@ func NewXIDWithTime(t time.Time) XID {
 	return XID(string(b[:]))
 }
 
-func IsXIDHex(s string) bool {
-	if len(s) != 24 {
-		return false
-	}
-	_, err := hex.DecodeString(s)
-	return err == nil
-}
-
 func (id XID) String() string {
-	return fmt.Sprintf(`XID("%x")`, string(id))
+	return fmt.Sprintf(`XIDHex("%x")`, string(id))
 }
 
 func (id XID) Hex() string {
@@ -76,21 +101,62 @@ func (id XID) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf(`"%x"`, string(id))), nil
 }
 
+var nullBytes = []byte("null")
+
 func (id *XID) UnmarshalJSON(data []byte) error {
 	if len(data) == 2 && data[0] == '"' && data[1] == '"' || bytes.Equal(data, nullBytes) {
 		*id = ""
 		return nil
 	}
 	if len(data) != 26 || data[0] != '"' || data[25] != '"' {
-		return errors.New(fmt.Sprintf("Invalid XID in JSON: %s", string(data)))
+		return errors.New(fmt.Sprintf("invalid XID in JSON: %s", string(data)))
 	}
 	var buf [12]byte
 	_, err := hex.Decode(buf[:], data[1:25])
 	if err != nil {
-		return errors.New(fmt.Sprintf("Invalid XID in JSON: %s (%s)", string(data), err))
+		return errors.New(fmt.Sprintf("invalid XID in JSON: %s (%s)", string(data), err))
 	}
 	*id = XID(string(buf[:]))
 	return nil
+}
+
+func (id XID) MarshalText() ([]byte, error) {
+	return []byte(fmt.Sprintf("%x", string(id))), nil
+}
+
+func (id *XID) UnmarshalText(data []byte) error {
+	if len(data) == 1 && data[0] == ' ' || len(data) == 0 {
+		*id = ""
+		return nil
+	}
+	if len(data) != 24 {
+		return fmt.Errorf("invalid XID: %s", data)
+	}
+	var buf [12]byte
+	_, err := hex.Decode(buf[:], data[:])
+	if err != nil {
+		return fmt.Errorf("invalid XID: %s (%s)", data, err)
+	}
+	*id = XID(string(buf[:]))
+	return nil
+}
+
+func (id XID) Value() (driver.Value, error) {
+	b, err := id.MarshalText()
+	return string(b), err
+}
+
+func (id *XID) Scan(value interface{}) (err error) {
+	switch val := value.(type) {
+	case string:
+		return id.UnmarshalText([]byte(val))
+	case []byte:
+		return id.UnmarshalText(val)
+	case nil:
+		return nil
+	default:
+		return fmt.Errorf("xid: scanning unsupported type: %T", value)
+	}
 }
 
 func (id XID) Valid() bool {
@@ -99,7 +165,7 @@ func (id XID) Valid() bool {
 
 func (id XID) byteSlice(start, end int) []byte {
 	if len(id) != 12 {
-		panic(fmt.Sprintf("Invalid XID: %q", string(id)))
+		panic(fmt.Sprintf("invalid XID: %q", string(id)))
 	}
 	return []byte(string(id)[start:end])
 }
@@ -120,21 +186,4 @@ func (id XID) Pid() uint16 {
 func (id XID) Counter() int32 {
 	b := id.byteSlice(9, 12)
 	return int32(uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2]))
-}
-
-func readMachineId() []byte {
-	var sum [3]byte
-	id := sum[:]
-	hostname, err1 := os.Hostname()
-	if err1 != nil {
-		_, err2 := io.ReadFull(rand.Reader, id)
-		if err2 != nil {
-			panic(fmt.Errorf("cannot get hostname: %v; %v", err1, err2))
-		}
-		return id
-	}
-	hw := md5.New()
-	hw.Write([]byte(hostname))
-	copy(id, hw.Sum(nil))
-	return id
 }

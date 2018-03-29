@@ -25,7 +25,7 @@ type XID string
 func XIDHex(s string) XID {
 	d, err := hex.DecodeString(s)
 	if err != nil || len(d) != 12 {
-		panic(fmt.Sprintf("Invalid input to ObjectIdHex: %q", s))
+		panic(fmt.Sprintf("Invalid input to XIDHex: %q", s))
 	}
 	return XID(d)
 }

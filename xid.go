@@ -50,7 +50,7 @@ func NewXID() XID {
 	return XID(b[:])
 }
 
-func NewObjectIdWithTime(t time.Time) XID {
+func NewXIDWithTime(t time.Time) XID {
 	var b [12]byte
 	binary.BigEndian.PutUint32(b[:4], uint32(t.Unix()))
 	return XID(string(b[:]))

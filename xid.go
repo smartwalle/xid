@@ -36,7 +36,7 @@ func IsXIDHex(s string) bool {
 
 var idCounter = readRandomUint32()
 var machineId = readMachineId()
-var processId = os.Getpid()
+var processId = readProcessId()
 
 func readRandomUint32() uint32 {
 	var b [4]byte
@@ -64,6 +64,14 @@ func readMachineId() []byte {
 	return id
 }
 
+func readProcessId() []byte {
+	var pId = os.Getpid()
+	var id = make([]byte, 2)
+	id[0] = byte(pId >> 8)
+	id[1] = byte(pId)
+	return id
+}
+
 func NewXID() XID {
 	var b [12]byte
 	// Timestamp, 4 bytes, big endian
@@ -73,8 +81,8 @@ func NewXID() XID {
 	b[5] = machineId[1]
 	b[6] = machineId[2]
 	// Pid, 2 bytes, specs don't specify endianness, but we use big endian.
-	b[7] = byte(processId >> 8)
-	b[8] = byte(processId)
+	b[7] = processId[0] // byte(processId >> 8)
+	b[8] = processId[1] // byte(processId)
 	// Increment, 3 bytes, big endian
 	i := atomic.AddUint32(&idCounter, 1)
 	b[9] = byte(i >> 16)

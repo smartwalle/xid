@@ -20,14 +20,14 @@ type XID string
 
 func XIDHex(s string) XID {
 	d, err := hex.DecodeString(s)
-	if err != nil || len(d) != 12 {
+	if err != nil || len(d) != 16 {
 		panic(fmt.Sprintf("invalid input to XIDHex: %q", s))
 	}
 	return XID(d)
 }
 
 func IsXIDHex(s string) bool {
-	if len(s) != 24 {
+	if len(s) != 32 {
 		return false
 	}
 	_, err := hex.DecodeString(s)
@@ -73,27 +73,27 @@ func readProcessId() []byte {
 }
 
 func NewXID() XID {
-	var b [12]byte
+	var b [16]byte
 	// Timestamp, 4 bytes, big endian
-	binary.BigEndian.PutUint32(b[:], uint32(time.Now().Unix()))
+	binary.BigEndian.PutUint64(b[:], uint64(time.Now().UnixNano()))
 	// Machine, first 3 bytes of md5(hostname)
-	b[4] = machineId[0]
-	b[5] = machineId[1]
-	b[6] = machineId[2]
+	b[8] = machineId[0]
+	b[9] = machineId[1]
+	b[10] = machineId[2]
 	// Pid, 2 bytes, specs don't specify endianness, but we use big endian.
-	b[7] = processId[0] // byte(processId >> 8)
-	b[8] = processId[1] // byte(processId)
+	b[11] = processId[0] // byte(processId >> 8)
+	b[12] = processId[1] // byte(processId)
 	// Increment, 3 bytes, big endian
 	i := atomic.AddUint32(&idCounter, 1)
-	b[9] = byte(i >> 16)
-	b[10] = byte(i >> 8)
-	b[11] = byte(i)
+	b[13] = byte(i >> 16)
+	b[14] = byte(i >> 8)
+	b[15] = byte(i)
 	return XID(b[:])
 }
 
 func NewXIDWithTime(t time.Time) XID {
-	var b [12]byte
-	binary.BigEndian.PutUint32(b[:4], uint32(t.Unix()))
+	var b [16]byte
+	binary.BigEndian.PutUint64(b[:8], uint64(t.UnixNano()))
 	return XID(string(b[:]))
 }
 
@@ -116,11 +116,11 @@ func (id *XID) UnmarshalJSON(data []byte) error {
 		*id = ""
 		return nil
 	}
-	if len(data) != 26 || data[0] != '"' || data[25] != '"' {
+	if len(data) != 34 || data[0] != '"' || data[33] != '"' {
 		return errors.New(fmt.Sprintf("invalid XID in JSON: %s", string(data)))
 	}
-	var buf [12]byte
-	_, err := hex.Decode(buf[:], data[1:25])
+	var buf [16]byte
+	_, err := hex.Decode(buf[:], data[1:33])
 	if err != nil {
 		return errors.New(fmt.Sprintf("invalid XID in JSON: %s (%s)", string(data), err))
 	}
@@ -137,10 +137,10 @@ func (id *XID) UnmarshalText(data []byte) error {
 		*id = ""
 		return nil
 	}
-	if len(data) != 24 {
+	if len(data) != 32 {
 		return fmt.Errorf("invalid XID: %s", data)
 	}
-	var buf [12]byte
+	var buf [16]byte
 	_, err := hex.Decode(buf[:], data[:])
 	if err != nil {
 		return fmt.Errorf("invalid XID: %s (%s)", data, err)
@@ -168,30 +168,30 @@ func (id *XID) Scan(value interface{}) (err error) {
 }
 
 func (id XID) Valid() bool {
-	return len(id) == 12
+	return len(id) == 16
 }
 
 func (id XID) byteSlice(start, end int) []byte {
-	if len(id) != 12 {
+	if len(id) != 16 {
 		panic(fmt.Sprintf("invalid XID: %q", string(id)))
 	}
 	return []byte(string(id)[start:end])
 }
 
 func (id XID) Time() time.Time {
-	secs := int64(binary.BigEndian.Uint32(id.byteSlice(0, 4)))
-	return time.Unix(secs, 0)
+	secs := int64(binary.BigEndian.Uint64(id.byteSlice(0, 8)))
+	return time.Unix(secs/1e9, secs%1e9)
 }
 
 func (id XID) Machine() []byte {
-	return id.byteSlice(4, 7)
+	return id.byteSlice(8, 11)
 }
 
 func (id XID) Pid() uint16 {
-	return binary.BigEndian.Uint16(id.byteSlice(7, 9))
+	return binary.BigEndian.Uint16(id.byteSlice(11, 13))
 }
 
 func (id XID) Counter() int32 {
-	b := id.byteSlice(9, 12)
+	b := id.byteSlice(13, 16)
 	return int32(uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2]))
 }

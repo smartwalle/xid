@@ -7,6 +7,7 @@ import (
 
 func TestNewXID(t *testing.T) {
 	fmt.Println(NewXID())
+	fmt.Println(NewMID())
 }
 
 func BenchmarkNewXID(b *testing.B) {

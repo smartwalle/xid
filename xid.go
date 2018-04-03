@@ -93,7 +93,7 @@ func NewXID() XID {
 
 func NewXIDWithTime(t time.Time) XID {
 	var b [12]byte
-	binary.BigEndian.PutUint32(b[:4], uint32(t.UnixNano()))
+	binary.BigEndian.PutUint32(b[:4], uint32(t.Unix()))
 	return XID(string(b[:]))
 }
 

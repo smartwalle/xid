@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"time"
 	"sync/atomic"
+	"time"
 )
 
 // 从 mgo.bson 复制
@@ -38,7 +38,7 @@ func NewMID() MID {
 	binary.BigEndian.PutUint32(b[:], uint32(time.Now().Unix()))
 
 	// Increment, 3 bytes, big endian
-	i := atomic.AddUint32(&idCounter, 1)
+	i := atomic.AddUint32(&midCounter, 1)
 	b[4] = byte(i >> 16)
 	b[5] = byte(i >> 8)
 	b[6] = byte(i)

@@ -1,197 +1,142 @@
 package xid
 
 import (
-	"bytes"
-	"crypto/md5"
-	"crypto/rand"
-	"database/sql/driver"
-	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
-// 从 mgo.bson 复制
-type XID string
+const (
+	kSequenceBits uint8 = 22 // 序列号占用的位数
+	kNodeBits     uint8 = 8  // 数据节点占用的位数
 
-func XIDHex(s string) XID {
-	d, err := hex.DecodeString(s)
-	if err != nil || len(d) != 12 {
-		panic(fmt.Sprintf("invalid input to XIDHex: %q", s))
-	}
-	return XID(d)
-}
+	kMaxSequence int64 = -1 ^ (-1 << kSequenceBits) // 序列号最大值，用于防止溢出
+	kMaxNode     int64 = -1 ^ (-1 << kNodeBits)     // 数据节点最大值，用于防止溢出 0-255
 
-func IsXIDHex(s string) bool {
-	if len(s) != 24 {
-		return false
-	}
-	_, err := hex.DecodeString(s)
-	return err == nil
-}
+	kTimeShift = kNodeBits + kSequenceBits // 时间戳向左的偏移量
+	kNodeShift = kSequenceBits             // 数据节点向左的偏移量
 
-var idCounter = readRandomUint32()
-var machineId = readMachineId()
-var processId = readProcessId()
+	kNodeMask = kMaxNode << kSequenceBits
+)
 
-func readRandomUint32() uint32 {
-	var b [4]byte
-	_, err := io.ReadFull(rand.Reader, b[:])
-	if err != nil {
-		panic(fmt.Errorf("cannot read random xid: %v", err))
-	}
-	return uint32((uint32(b[0]) << 0) | (uint32(b[1]) << 8) | (uint32(b[2]) << 16) | (uint32(b[3]) << 24))
-}
+var (
+	ErrNodeNotAllowed = errors.New(fmt.Sprintf("xid: node can't be greater than %d or less than 0", kMaxNode))
+)
 
-func readMachineId() []byte {
-	var sum [3]byte
-	id := sum[:]
-	hostname, err1 := os.Hostname()
-	if err1 != nil {
-		_, err2 := io.ReadFull(rand.Reader, id)
-		if err2 != nil {
-			panic(fmt.Errorf("cannot get hostname: %v; %v", err1, err2))
+type Option func(*XID) error
+
+// WithNode 设置数据节点标识
+func WithNode(node int64) Option {
+	return func(x *XID) error {
+		if node < 0 || node > kMaxNode {
+			return ErrNodeNotAllowed
 		}
-		return id
+		x.node = node
+		return nil
 	}
-	hw := md5.New()
-	hw.Write([]byte(hostname))
-	copy(id, hw.Sum(nil))
+}
+
+// WithTimeOffset 设置时间偏移量
+func WithTimeOffset(t time.Time) Option {
+	return func(x *XID) error {
+		if t.IsZero() {
+			return nil
+		}
+		x.timeOffset = t.Unix()
+		return nil
+	}
+}
+
+type XID struct {
+	mu         sync.Mutex
+	second     int64 // 上一次生成 id 的时间戳（秒）
+	node       int64 // 数据节点
+	sequence   int64 // 当前秒已经生成的 id 序列号 (从0开始累加)
+	timeOffset int64
+}
+
+func New(opts ...Option) (*XID, error) {
+	var x = &XID{}
+	x.second = 0
+	x.node = 0
+	x.sequence = 0
+	x.timeOffset = 0
+
+	var err error
+	for _, opt := range opts {
+		if err = opt(x); err != nil {
+			return nil, err
+		}
+	}
+
+	return x, nil
+}
+
+func (this *XID) Next() int64 {
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	var second = time.Now().Unix()
+	if second < this.second {
+		return -1
+	}
+
+	if this.second == second {
+		this.sequence = (this.sequence + 1) & kMaxSequence
+		if this.sequence == 0 {
+			second = this.getNextSecond()
+		}
+	} else {
+		this.sequence = 0
+	}
+	this.second = second
+
+	var id = (second-this.timeOffset)<<kTimeShift | (this.node << kNodeShift) | (this.sequence)
 	return id
 }
 
-func readProcessId() []byte {
-	var pId = os.Getpid()
-	var id = make([]byte, 2)
-	id[0] = byte(pId >> 8)
-	id[1] = byte(pId)
-	return id
-}
-
-func NewXID() XID {
-	var b [12]byte
-	// Timestamp, 4 bytes, big endian
-	binary.BigEndian.PutUint32(b[:], uint32(time.Now().Unix()))
-	// Machine, first 3 bytes of md5(hostname)
-	b[4] = machineId[0]
-	b[5] = machineId[1]
-	b[6] = machineId[2]
-	// Pid, 2 bytes, specs don't specify endianness, but we use big endian.
-	b[7] = processId[0]
-	b[8] = processId[1]
-	// Increment, 3 bytes, big endian
-	i := atomic.AddUint32(&idCounter, 1)
-	b[9] = byte(i >> 16)
-	b[10] = byte(i >> 8)
-	b[11] = byte(i)
-	return XID(b[:])
-}
-
-func NewXIDWithTime(t time.Time) XID {
-	var b [12]byte
-	binary.BigEndian.PutUint32(b[:4], uint32(t.Unix()))
-	return XID(string(b[:]))
-}
-
-func (id XID) String() string {
-	return fmt.Sprintf(`XIDHex("%x")`, string(id))
-}
-
-func (id XID) Hex() string {
-	return hex.EncodeToString([]byte(id))
-}
-
-func (id XID) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%x"`, string(id))), nil
-}
-
-var nullBytes = []byte("null")
-
-func (id *XID) UnmarshalJSON(data []byte) error {
-	if len(data) == 2 && data[0] == '"' && data[1] == '"' || bytes.Equal(data, nullBytes) {
-		*id = ""
-		return nil
+func (this *XID) getNextSecond() int64 {
+	var second = time.Now().Unix()
+	for second < this.second {
+		second = time.Now().Unix()
 	}
-	if len(data) != 26 || data[0] != '"' || data[25] != '"' {
-		return errors.New(fmt.Sprintf("invalid XID in JSON: %s", string(data)))
-	}
-	var buf [12]byte
-	_, err := hex.Decode(buf[:], data[1:25])
+	return second
+}
+
+// Time 获取 id 的时间，单位是 second
+func Time(s int64) int64 {
+	return s >> kTimeShift
+}
+
+// Node 获取 id 的数据节点标识
+func Node(s int64) int64 {
+	return s & kNodeMask >> kNodeShift
+}
+
+//  Sequence 获取 id 的序列号
+func Sequence(s int64) int64 {
+	return s & kMaxSequence
+}
+
+var defaultXID *XID
+var once sync.Once
+
+func Next() int64 {
+	once.Do(func() {
+		defaultXID, _ = New()
+	})
+	return defaultXID.Next()
+}
+
+func Init(opts ...Option) (err error) {
+	once.Do(func() {
+		defaultXID, err = New(opts...)
+	})
+
 	if err != nil {
-		return errors.New(fmt.Sprintf("invalid XID in JSON: %s (%s)", string(data), err))
+		once = sync.Once{}
 	}
-	*id = XID(string(buf[:]))
-	return nil
-}
 
-func (id XID) MarshalText() ([]byte, error) {
-	return []byte(fmt.Sprintf("%x", string(id))), nil
-}
-
-func (id *XID) UnmarshalText(data []byte) error {
-	if len(data) == 1 && data[0] == ' ' || len(data) == 0 {
-		*id = ""
-		return nil
-	}
-	if len(data) != 24 {
-		return fmt.Errorf("invalid XID: %s", data)
-	}
-	var buf [12]byte
-	_, err := hex.Decode(buf[:], data[:])
-	if err != nil {
-		return fmt.Errorf("invalid XID: %s (%s)", data, err)
-	}
-	*id = XID(string(buf[:]))
-	return nil
-}
-
-func (id XID) Value() (driver.Value, error) {
-	b, err := id.MarshalText()
-	return string(b), err
-}
-
-func (id *XID) Scan(value interface{}) (err error) {
-	switch val := value.(type) {
-	case string:
-		return id.UnmarshalText([]byte(val))
-	case []byte:
-		return id.UnmarshalText(val)
-	case nil:
-		return nil
-	default:
-		return fmt.Errorf("xid: scanning unsupported type: %T", value)
-	}
-}
-
-func (id XID) Valid() bool {
-	return len(id) == 12
-}
-
-func (id XID) byteSlice(start, end int) []byte {
-	if len(id) != 12 {
-		panic(fmt.Sprintf("invalid XID: %q", string(id)))
-	}
-	return []byte(string(id)[start:end])
-}
-
-func (id XID) Time() time.Time {
-	secs := int64(binary.BigEndian.Uint32(id.byteSlice(0, 4)))
-	return time.Unix(secs, 0)
-}
-
-func (id XID) Machine() []byte {
-	return id.byteSlice(4, 7)
-}
-
-func (id XID) Pid() uint16 {
-	return binary.BigEndian.Uint16(id.byteSlice(7, 9))
-}
-
-func (id XID) Counter() int32 {
-	b := id.byteSlice(9, 12)
-	return int32(uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2]))
+	return err
 }

@@ -5,13 +5,14 @@ import (
 	"testing"
 )
 
-func TestNewXID(t *testing.T) {
-	fmt.Println(NewXID())
-	fmt.Println(NewMID())
+func TestXID_Next(t *testing.T) {
+	for i := 0; i < 100000; i++ {
+		fmt.Println(Next())
+	}
 }
 
-func BenchmarkNewXID(b *testing.B) {
+func BenchmarkXID_Next(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		NewXID()
+		Next()
 	}
 }

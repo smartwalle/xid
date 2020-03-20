@@ -113,8 +113,8 @@ func Time(s int64) int64 {
 	return s >> kTimeShift
 }
 
-// Node 获取 id 的数据节点标识
-func Node(s int64) int64 {
+// DataNode 获取 id 的数据节点标识
+func DataNode(s int64) int64 {
 	return s & kDataNodeMask >> kDataNodeShift
 }
 

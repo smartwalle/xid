@@ -22,7 +22,7 @@ func TestXID_Info(t *testing.T) {
 
 		var createdOn = timeOffset.Add(time.Duration(Time(id)) * time.Second)
 		var sequence = Sequence(id)
-		var node = Node(id)
+		var node = DataNode(id)
 
 		t.Log(id, "- 生成时间:", createdOn, "数据节点:", node, "序列号:", sequence)
 	}

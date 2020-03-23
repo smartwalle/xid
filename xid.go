@@ -79,10 +79,10 @@ func New(opts ...Option) (*XID, error) {
 
 func (this *XID) Next() int64 {
 	this.mu.Lock()
-	defer this.mu.Unlock()
 
 	var second = time.Now().Unix()
 	if second < this.second {
+		this.mu.Unlock()
 		return -1
 	}
 
@@ -95,8 +95,10 @@ func (this *XID) Next() int64 {
 		this.sequence = 0
 	}
 	this.second = second
+	var sequence = this.sequence
+	this.mu.Unlock()
 
-	var id = (second-this.timeOffset)<<kTimeShift | (this.node << kDataNodeShift) | (this.sequence)
+	var id = (second-this.timeOffset)<<kTimeShift | (this.node << kDataNodeShift) | (sequence)
 	return id
 }
 

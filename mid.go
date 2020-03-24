@@ -91,12 +91,6 @@ func NewMID() MID {
 	return MID(b[:])
 }
 
-func NewMIDWithTime(t time.Time) MID {
-	var b [12]byte
-	binary.BigEndian.PutUint32(b[:4], uint32(t.Unix()))
-	return MID(string(b[:]))
-}
-
 func (id MID) String() string {
 	return fmt.Sprintf(`MIDHex("%x")`, string(id))
 }

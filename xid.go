@@ -7,21 +7,27 @@ import (
 	"time"
 )
 
-// 34 位用于存储时间戳(秒)信息，最大可以存储的值为 17179869183，即 2514-05-30 09:53:03.
-// 8 位用于存储数据节点信息，最大可以存储 255，即可以有 256 个节点.
+// 32 位用于存储时间戳(秒)信息，最大可以存储的值为 4294967296，即 2106-02-07 14:28:16.
+//
+// 10 位用于存储数据节点信息，最大可以存储 1023，即可以有 1024 个节点.
+//
 // 21 位用于存储每一秒产生的序列号信息，最大可以存储 2097151，即每秒最大可以生产 2097152 个序列号.
 
 const (
 	kSequenceBits uint8 = 21 // 序列号占用的位数
-	kDataNodeBits uint8 = 8  // 数据节点占用的位数
+	kDataNodeBits uint8 = 10 // 数据节点占用的位数
 
 	kMaxSequence int64 = -1 ^ (-1 << kSequenceBits) // 序列号最大值，存储范围为 0-2097151
-	kMaxDataNode int64 = -1 ^ (-1 << kDataNodeBits) // 数据节点最大值，存储范围为 0-255
+	kMaxDataNode int64 = -1 ^ (-1 << kDataNodeBits) // 数据节点最大值，存储范围为 0-1023
 
 	kTimeShift     = kDataNodeBits + kSequenceBits // 时间戳向左的偏移量
 	kDataNodeShift = kSequenceBits                 // 数据节点向左的偏移量
 
 	kDataNodeMask = kMaxDataNode << kSequenceBits
+)
+
+const (
+	MaxDataNode = kMaxDataNode
 )
 
 var (

@@ -26,10 +26,6 @@ const (
 	kDataNodeMask = kMaxDataNode << kSequenceBits
 )
 
-const (
-	MaxDataNode = kMaxDataNode
-)
-
 var (
 	ErrDataNodeNotAllowed = errors.New(fmt.Sprintf("xid: data node can't be greater than %d or less than 0", kMaxDataNode))
 )

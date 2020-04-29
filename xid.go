@@ -83,6 +83,14 @@ func New(opts ...Option) (*XID, error) {
 	return x, nil
 }
 
+func (this *XID) DataNode() int64 {
+	return this.node
+}
+
+func (this *XID) TimeOffset() int64 {
+	return this.timeOffset
+}
+
 func (this *XID) Next() int64 {
 	this.mu.Lock()
 
@@ -131,19 +139,19 @@ func Sequence(s int64) int64 {
 	return s & kMaxSequence
 }
 
-var defaultXID *XID
+var sharedXID *XID
 var once sync.Once
 
 func Next() int64 {
 	once.Do(func() {
-		defaultXID, _ = New()
+		sharedXID, _ = New()
 	})
-	return defaultXID.Next()
+	return sharedXID.Next()
 }
 
 func Init(opts ...Option) (err error) {
 	once.Do(func() {
-		defaultXID, err = New(opts...)
+		sharedXID, err = New(opts...)
 	})
 
 	if err != nil {
@@ -151,4 +159,8 @@ func Init(opts ...Option) (err error) {
 	}
 
 	return err
+}
+
+func SharedInstance() *XID {
+	return sharedXID
 }

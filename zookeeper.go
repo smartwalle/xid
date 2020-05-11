@@ -16,7 +16,7 @@ func WithZookeeper(conn *zk.Conn, key string) Option {
 		}
 	}
 
-	var lockPath = path.Join(fmt.Sprintf("/smartwalle/xid/%s/locker", key))
+	var lockPath = path.Join(fmt.Sprintf("/xid/%s/locker", key))
 	var lock = zk.NewLock(conn, lockPath, zk.WorldACL(zk.PermAll))
 	if err := lock.Lock(); err != nil {
 		lock.Unlock()
@@ -25,7 +25,7 @@ func WithZookeeper(conn *zk.Conn, key string) Option {
 		}
 	}
 
-	children, _, err := conn.Children(fmt.Sprintf("/smartwalle/xid/%s", key))
+	children, _, err := conn.Children(fmt.Sprintf("/xid/%s", key))
 	if err != nil {
 		lock.Unlock()
 		return func(x *XID) error {
@@ -43,7 +43,7 @@ func WithZookeeper(conn *zk.Conn, key string) Option {
 			continue
 		}
 
-		var nPath = path.Join(fmt.Sprintf("/smartwalle/xid/%s/node-%d", key, i))
+		var nPath = path.Join(fmt.Sprintf("/xid/%s/node-%d", key, i))
 		exists, _, err := conn.Exists(nPath)
 		if err != nil {
 			lock.Unlock()

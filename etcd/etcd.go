@@ -16,7 +16,7 @@ const (
 
 var ErrInvalidETCDClient = errors.New("xid: invalid ETCD client")
 
-func WithETCD(client *clientv3.Client, key string, opts ...concurrency.SessionOption) xid.Option {
+func WithDataNode(client *clientv3.Client, key string, opts ...concurrency.SessionOption) xid.Option {
 	if client == nil {
 		return func(x *xid.XID) error {
 			return ErrInvalidETCDClient

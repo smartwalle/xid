@@ -12,7 +12,7 @@ const zkPrefix = "/xid/zk/"
 
 var ErrInvalidZKConnection = errors.New("xid: invalid zookeeper connection")
 
-func WithZookeeper(conn *zk.Conn, key string) xid.Option {
+func WithDataNode(conn *zk.Conn, key string) xid.Option {
 	if conn == nil {
 		return func(x *xid.XID) error {
 			return ErrInvalidZKConnection

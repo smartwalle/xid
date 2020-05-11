@@ -15,7 +15,7 @@ func main() {
 	}
 
 	for i := 0; i < 100; i++ {
-		id, err := xid.New(zookeeper.WithZookeeper(conn, "test"))
+		id, err := xid.New(zookeeper.WithDataNode(conn, "test"))
 		if err != nil {
 			fmt.Println(err)
 			return

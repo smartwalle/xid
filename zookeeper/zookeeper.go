@@ -8,7 +8,7 @@ import (
 	"path"
 )
 
-const zkPrefix = "/xid/zk/"
+const kPrefix = "/xid"
 
 var ErrInvalidZKConnection = errors.New("xid: invalid zookeeper connection")
 
@@ -19,7 +19,7 @@ func WithDataNode(conn *zk.Conn, key string) xid.Option {
 		}
 	}
 
-	var lockPath = path.Join(zkPrefix, key, "/locker")
+	var lockPath = path.Join(kPrefix, key, "/locker")
 	var lock = zk.NewLock(conn, lockPath, zk.WorldACL(zk.PermAll))
 	if err := lock.Lock(); err != nil {
 		lock.Unlock()
@@ -27,7 +27,7 @@ func WithDataNode(conn *zk.Conn, key string) xid.Option {
 			return err
 		}
 	}
-	children, _, err := conn.Children(path.Join(zkPrefix, key))
+	children, _, err := conn.Children(path.Join(kPrefix, key))
 	if err != nil {
 		lock.Unlock()
 		return func(x *xid.XID) error {
@@ -46,7 +46,7 @@ func WithDataNode(conn *zk.Conn, key string) xid.Option {
 			continue
 		}
 
-		var nPath = path.Join(zkPrefix, key, nValue)
+		var nPath = path.Join(kPrefix, key, nValue)
 		exists, _, err := conn.Exists(nPath)
 		if err != nil {
 			lock.Unlock()

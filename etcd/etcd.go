@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	etcdPrefix = "/xid/etcd/"
+	kPrefix = "/xid"
 )
 
 var ErrInvalidETCDClient = errors.New("xid: invalid ETCD client")
@@ -34,7 +34,7 @@ func WithDataNode(client *clientv3.Client, key string, opts ...concurrency.Sessi
 	}
 	defer session.Close()
 
-	var lockPath = path.Join(etcdPrefix, key, "/locker")
+	var lockPath = path.Join(kPrefix, key, "/locker")
 	var lock = concurrency.NewMutex(session, lockPath)
 	if err = lock.Lock(context.Background()); err != nil {
 		return func(x *xid.XID) error {
@@ -44,7 +44,7 @@ func WithDataNode(client *clientv3.Client, key string, opts ...concurrency.Sessi
 	defer lock.Unlock(context.Background())
 
 	var kv = clientv3.NewKV(client)
-	rsp, err := kv.Get(context.Background(), path.Join(etcdPrefix, key), clientv3.WithPrefix())
+	rsp, err := kv.Get(context.Background(), path.Join(kPrefix, key), clientv3.WithPrefix())
 	if err != nil {
 		return func(x *xid.XID) error {
 			return err
@@ -86,7 +86,7 @@ func WithDataNode(client *clientv3.Client, key string, opts ...concurrency.Sessi
 	}
 
 	var nValue = fmt.Sprintf("node-%d", nNode)
-	if _, err = kv.Put(context.Background(), path.Join(etcdPrefix, key, nValue), nValue, clientv3.WithLease(grantRsp.ID)); err != nil {
+	if _, err = kv.Put(context.Background(), path.Join(kPrefix, key, nValue), nValue, clientv3.WithLease(grantRsp.ID)); err != nil {
 		lease.Revoke(context.Background(), grantRsp.ID)
 		return func(x *xid.XID) error {
 			return err

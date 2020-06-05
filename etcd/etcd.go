@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	kPrefix = "/xid"
+	kPrefix = "xid"
 )
 
 var ErrInvalidETCDClient = errors.New("xid: invalid ETCD client")
@@ -34,7 +34,7 @@ func WithDataNode(client *clientv3.Client, key string, opts ...concurrency.Sessi
 	}
 	defer session.Close()
 
-	var lockPath = path.Join(kPrefix, key, "/locker")
+	var lockPath = path.Join(kPrefix, key, "locker")
 	var lock = concurrency.NewMutex(session, lockPath)
 	if err = lock.Lock(context.Background()); err != nil {
 		return func(x *xid.XID) error {

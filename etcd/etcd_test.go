@@ -2,8 +2,8 @@ package etcd
 
 import (
 	"fmt"
-	"github.com/coreos/etcd/clientv3"
 	"github.com/smartwalle/xid"
+	"go.etcd.io/etcd/client/v3"
 	"testing"
 )
 

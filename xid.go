@@ -134,7 +134,7 @@ func DataNode(s int64) int64 {
 	return s & kDataNodeMask >> kDataNodeShift
 }
 
-//  Sequence 获取 id 的序列号
+// Sequence 获取 id 的序列号
 func Sequence(s int64) int64 {
 	return s & kMaxSequence
 }

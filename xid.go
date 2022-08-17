@@ -139,19 +139,19 @@ func Sequence(s int64) int64 {
 	return s & kMaxSequence
 }
 
-var sharedInstance *XID
+var shared *XID
 var once sync.Once
 
 func Next() int64 {
 	once.Do(func() {
-		sharedInstance, _ = New()
+		shared, _ = New()
 	})
-	return sharedInstance.Next()
+	return shared.Next()
 }
 
 func Init(opts ...Option) (err error) {
 	once.Do(func() {
-		sharedInstance, err = New(opts...)
+		shared, err = New(opts...)
 	})
 
 	if err != nil {
@@ -161,6 +161,6 @@ func Init(opts ...Option) (err error) {
 	return err
 }
 
-func SharedInstance() *XID {
-	return sharedInstance
+func Default() *XID {
+	return shared
 }

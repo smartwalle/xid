@@ -83,42 +83,42 @@ func New(opts ...Option) (*XID, error) {
 	return x, nil
 }
 
-func (this *XID) DataNode() int64 {
-	return this.node
+func (x *XID) DataNode() int64 {
+	return x.node
 }
 
-func (this *XID) TimeOffset() int64 {
-	return this.timeOffset
+func (x *XID) TimeOffset() int64 {
+	return x.timeOffset
 }
 
-func (this *XID) Next() int64 {
-	this.mu.Lock()
+func (x *XID) Next() int64 {
+	x.mu.Lock()
 
 	var second = time.Now().Unix()
-	if second < this.second {
-		this.mu.Unlock()
+	if second < x.second {
+		x.mu.Unlock()
 		return -1
 	}
 
-	if this.second == second {
-		this.sequence = (this.sequence + 1) & kMaxSequence
-		if this.sequence == 0 {
-			second = this.getNextSecond()
+	if x.second == second {
+		x.sequence = (x.sequence + 1) & kMaxSequence
+		if x.sequence == 0 {
+			second = x.getNextSecond()
 		}
 	} else {
-		this.sequence = 0
+		x.sequence = 0
 	}
-	this.second = second
-	var sequence = this.sequence
-	this.mu.Unlock()
+	x.second = second
+	var sequence = x.sequence
+	x.mu.Unlock()
 
-	var id = (second-this.timeOffset)<<kTimeShift | (this.node << kDataNodeShift) | (sequence)
+	var id = (second-x.timeOffset)<<kTimeShift | (x.node << kDataNodeShift) | (sequence)
 	return id
 }
 
-func (this *XID) getNextSecond() int64 {
+func (x *XID) getNextSecond() int64 {
 	var second = time.Now().Unix()
-	for second < this.second {
+	for second < x.second {
 		second = time.Now().Unix()
 	}
 	return second

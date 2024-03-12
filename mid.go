@@ -20,7 +20,7 @@ const (
 	kMidHexLen = kMidLen * 2
 )
 
-// 从 mgo.bson 复制
+// MID 从 mgo.bson 复制
 type MID string
 
 func MIDHex(s string) MID {
@@ -96,23 +96,23 @@ func NewMID() MID {
 	return MID(b[:])
 }
 
-func (id MID) String() string {
-	return fmt.Sprintf(`MIDHex("%x")`, string(id))
+func (m MID) String() string {
+	return fmt.Sprintf(`MIDHex("%x")`, string(m))
 }
 
-func (id MID) Hex() string {
-	return hex.EncodeToString([]byte(id))
+func (m MID) Hex() string {
+	return hex.EncodeToString([]byte(m))
 }
 
-func (id MID) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%x"`, string(id))), nil
+func (m MID) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"%x"`, string(m))), nil
 }
 
 var nullBytes = []byte("null")
 
-func (id *MID) UnmarshalJSON(data []byte) error {
+func (m *MID) UnmarshalJSON(data []byte) error {
 	if len(data) == 2 && data[0] == '"' && data[1] == '"' || bytes.Equal(data, nullBytes) {
-		*id = ""
+		*m = ""
 		return nil
 	}
 	if len(data) != kMidHexLen+2 || data[0] != '"' || data[kMidHexLen+1] != '"' {
@@ -123,17 +123,17 @@ func (id *MID) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return errors.New(fmt.Sprintf("MID: invalid MID in JSON: %s (%s)", string(data), err))
 	}
-	*id = MID(string(buf[:]))
+	*m = MID(string(buf[:]))
 	return nil
 }
 
-func (id MID) MarshalText() ([]byte, error) {
-	return []byte(fmt.Sprintf("%x", string(id))), nil
+func (m MID) MarshalText() ([]byte, error) {
+	return []byte(fmt.Sprintf("%x", string(m))), nil
 }
 
-func (id *MID) UnmarshalText(data []byte) error {
+func (m *MID) UnmarshalText(data []byte) error {
 	if len(data) == 1 && data[0] == ' ' || len(data) == 0 {
-		*id = ""
+		*m = ""
 		return nil
 	}
 	if len(data) != kMidHexLen {
@@ -144,21 +144,21 @@ func (id *MID) UnmarshalText(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("MID: invalid MID: %s (%s)", data, err)
 	}
-	*id = MID(string(buf[:]))
+	*m = MID(string(buf[:]))
 	return nil
 }
 
-func (id MID) Value() (driver.Value, error) {
-	b, err := id.MarshalText()
+func (m MID) Value() (driver.Value, error) {
+	b, err := m.MarshalText()
 	return string(b), err
 }
 
-func (id *MID) Scan(value interface{}) (err error) {
+func (m *MID) Scan(value interface{}) (err error) {
 	switch val := value.(type) {
 	case string:
-		return id.UnmarshalText([]byte(val))
+		return m.UnmarshalText([]byte(val))
 	case []byte:
-		return id.UnmarshalText(val)
+		return m.UnmarshalText(val)
 	case nil:
 		return nil
 	default:
@@ -166,30 +166,30 @@ func (id *MID) Scan(value interface{}) (err error) {
 	}
 }
 
-func (id MID) Valid() bool {
-	return len(id) == kMidLen
+func (m MID) Valid() bool {
+	return len(m) == kMidLen
 }
 
-func (id MID) byteSlice(start, end int) []byte {
-	if len(id) != kMidLen {
-		panic(fmt.Sprintf("MID: invalid MID: %q", string(id)))
+func (m MID) byteSlice(start, end int) []byte {
+	if len(m) != kMidLen {
+		panic(fmt.Sprintf("MID: invalid MID: %q", string(m)))
 	}
-	return []byte(string(id)[start:end])
+	return []byte(string(m)[start:end])
 }
 
-func (id MID) Time() int64 {
-	return int64(binary.BigEndian.Uint32(id.byteSlice(0, 4)))
+func (m MID) Time() int64 {
+	return int64(binary.BigEndian.Uint32(m.byteSlice(0, 4)))
 }
 
-func (id MID) Machine() []byte {
-	return id.byteSlice(4, 7)
+func (m MID) Machine() []byte {
+	return m.byteSlice(4, 7)
 }
 
-func (id MID) Pid() uint16 {
-	return binary.BigEndian.Uint16(id.byteSlice(7, 9))
+func (m MID) Pid() uint16 {
+	return binary.BigEndian.Uint16(m.byteSlice(7, 9))
 }
 
-func (id MID) Counter() int32 {
-	b := id.byteSlice(9, 12)
+func (m MID) Counter() int32 {
+	b := m.byteSlice(9, 12)
 	return int32(uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2]))
 }

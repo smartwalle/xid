@@ -1,194 +1,340 @@
+// Package xid 提供基于内存的 Snowflake 风格 uint64 ID 生成器。
+//
+// 默认布局使用 42 位存储已过毫秒数，10 位存储 worker，12 位存储同一毫秒内的序列号。
+// XID 可安全并发使用，并保证同一进程、同一 worker 内生成的 ID 唯一。
 package xid
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 )
 
-// 33 位用于存储时间戳(秒)信息，最大可以存储的值为 8589934591，即 2242-03-16 12:56:31.
-//
-// 10 位用于存储数据节点信息，最大可以存储 1023，即可以有 1024 个节点.
-//
-// 21 位用于存储每一秒产生的序列号信息，最大可以存储 2097151，即每秒最大可以生产 2097152 个序列号.
-
 const (
-	kSequenceBits uint8 = 21 // 序列号占用的位数
-	kDataNodeBits uint8 = 10 // 数据节点占用的位数
-	kTimeBits     uint8 = 64 - kDataNodeBits - kSequenceBits
-
-	kMaxSequence = ^uint64(0) >> (64 - kSequenceBits) // 序列号最大值，存储范围为 0-2097151
-	kMaxDataNode = ^uint64(0) >> (64 - kDataNodeBits) // 数据节点最大值，存储范围为 0-1023
-	kMaxTime     = ^uint64(0) >> (64 - kTimeBits)     // 时间戳最大值，存储范围为 0-8589934591
-
-	kTimeShift     = kDataNodeBits + kSequenceBits // 时间戳向左的偏移量
-	kDataNodeShift = kSequenceBits                 // 数据节点向左的偏移量
-
-	kDataNodeMask = kMaxDataNode << kSequenceBits
-)
-
-const (
-	MaxDataNode = kMaxDataNode
+	defaultWorkerBits       = uint8(10)
+	defaultSequenceBits     = uint8(12)
+	defaultMaxClockBackward = time.Second
+	defaultRetryDelay       = time.Millisecond
+	defaultMaxBatchSize     = 200
 )
 
 var (
-	ErrDataNodeNotAllowed   = errors.New(fmt.Sprintf("data node can't be greater than %d or less than 0", kMaxDataNode))
-	ErrTimeOffsetNotAllowed = errors.New(fmt.Sprintf("time offset can't be after current time or make timestamp greater than %d", kMaxTime))
-	ErrTimeOverflow         = errors.New(fmt.Sprintf("timestamp can't be greater than %d", kMaxTime))
-	ErrClockBackwards       = errors.New("clock moved backwards")
+	// ErrInvalidConfig 表示生成器配置不合法。
+	ErrInvalidConfig = errors.New("invalid config")
+
+	// ErrClockBackward 表示本地时钟回拨超过配置的容忍范围，或当前时间早于 epoch。
+	ErrClockBackward = errors.New("clock moved backward")
+
+	// ErrTimeOverflow 表示已过时间戳无法放入配置出的时间戳位宽。
+	ErrTimeOverflow = errors.New("timestamp exceeds configured bit width")
 )
 
-type Option func(*XID) error
+// Options 控制 ID 的生成和解析方式。
+type Options struct {
+	// Epoch 会在组装 ID 前从当前本地时间中扣除。
+	Epoch time.Time
 
-// WithDataNode 设置数据节点标识
-func WithDataNode(node int64) Option {
-	return func(x *XID) error {
-		if node < 0 || uint64(node) > kMaxDataNode {
-			return ErrDataNodeNotAllowed
-		}
-		x.node = uint64(node)
-		return nil
+	// Worker 标识当前生成器实例。需要跨进程唯一时，调用方必须为不同进程分配不同 worker。
+	Worker uint64
+
+	// WorkerBits 是 worker 段位宽。
+	WorkerBits uint8
+
+	// SequenceBits 是序列号段位宽。
+	SequenceBits uint8
+
+	// MaxClockBackward 是逻辑时钟可吸收的最大本地时钟回拨时长。
+	// 超过该值会返回 ErrClockBackward。
+	MaxClockBackward time.Duration
+
+	// RetryDelay 是序列号耗尽导致逻辑时钟领先本地时钟时的等待间隔。
+	RetryDelay time.Duration
+
+	// MaxBatchSize 限制一次 NextBatch 最多可保留的 ID 数量。
+	MaxBatchSize int
+}
+
+// Option 修改 XID 配置。
+type Option func(*Options)
+
+// WithEpoch 设置生成 ID 使用的自定义起始时间。
+func WithEpoch(epoch time.Time) Option {
+	return func(opts *Options) {
+		opts.Epoch = epoch
 	}
 }
 
-// WithTimeOffset 设置时间偏移量
-func WithTimeOffset(t time.Time) Option {
-	return func(x *XID) error {
-		if t.IsZero() {
-			return nil
-		}
-		var now = time.Now().Unix()
-		var offset = t.Unix()
-		if offset > now || uint64(now-offset) > kMaxTime {
-			return ErrTimeOffsetNotAllowed
-		}
-		x.timeOffset = offset
-		return nil
+// WithWorker 设置 worker 标识。
+func WithWorker(worker uint64) Option {
+	return func(opts *Options) {
+		opts.Worker = worker
 	}
 }
 
+// WithBits 设置 worker 和序列号的位宽。
+func WithBits(workerBits, sequenceBits uint8) Option {
+	return func(opts *Options) {
+		opts.WorkerBits = workerBits
+		opts.SequenceBits = sequenceBits
+	}
+}
+
+// WithMaxClockBackward 设置允许本地时钟回拨的最大时长。
+func WithMaxClockBackward(duration time.Duration) Option {
+	return func(opts *Options) {
+		opts.MaxClockBackward = duration
+	}
+}
+
+// WithRetryDelay 设置等待本地时间追上逻辑时间时的重试间隔。
+func WithRetryDelay(delay time.Duration) Option {
+	return func(opts *Options) {
+		opts.RetryDelay = delay
+	}
+}
+
+// WithMaxBatchSize 设置 NextBatch 单次允许的最大数量。
+func WithMaxBatchSize(n int) Option {
+	return func(opts *Options) {
+		opts.MaxBatchSize = n
+	}
+}
+
+// XID 使用本地内存状态生成 Snowflake 风格 uint64 ID。
 type XID struct {
-	mu         sync.Mutex
-	second     int64  // 上一次生成 id 的时间戳（秒）
-	node       uint64 // 数据节点
-	sequence   uint64 // 当前秒已经生成的 id 序列号 (从0开始累加)
-	timeOffset int64  // 时间偏移量
+	opts Options
+
+	mu        sync.Mutex
+	lastMs    int64
+	lastSeq   uint64
+	worker    uint64
+	workerMax uint64
+
+	workerShift   uint8
+	timestampBits uint8
+	sequenceMask  uint64
+	timestampMask uint64
 }
 
-func New(opts ...Option) (*XID, error) {
-	var x = &XID{}
-	x.second = 0
-	x.node = 0
-	x.sequence = 0
-	x.timeOffset = 0
+func defaultOptions() Options {
+	return Options{
+		Epoch:            time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		Worker:           0,
+		WorkerBits:       defaultWorkerBits,
+		SequenceBits:     defaultSequenceBits,
+		MaxClockBackward: defaultMaxClockBackward,
+		RetryDelay:       defaultRetryDelay,
+		MaxBatchSize:     defaultMaxBatchSize,
+	}
+}
 
-	var err error
-	for _, opt := range opts {
-		if err = opt(x); err != nil {
+// New 创建基于内存的 XID。
+func New(options ...Option) (*XID, error) {
+	opts := defaultOptions()
+	for _, opt := range options {
+		if opt != nil {
+			opt(&opts)
+		}
+	}
+	if err := validateOptions(opts); err != nil {
+		return nil, err
+	}
+
+	timestampBits := uint8(64 - int(opts.WorkerBits) - int(opts.SequenceBits))
+	g := &XID{
+		opts:          opts,
+		lastMs:        -1,
+		lastSeq:       0,
+		worker:        opts.Worker,
+		workerMax:     bitMask(opts.WorkerBits),
+		workerShift:   opts.SequenceBits,
+		timestampBits: timestampBits,
+		sequenceMask:  bitMask(opts.SequenceBits),
+		timestampMask: bitMask(timestampBits),
+	}
+	return g, nil
+}
+
+func validateOptions(opts Options) error {
+	if opts.Epoch.IsZero() {
+		return fmt.Errorf("%w: epoch is zero", ErrInvalidConfig)
+	}
+	if opts.WorkerBits == 0 {
+		return fmt.Errorf("%w: worker bits must be positive", ErrInvalidConfig)
+	}
+	if opts.SequenceBits == 0 {
+		return fmt.Errorf("%w: sequence bits must be positive", ErrInvalidConfig)
+	}
+	if int(opts.WorkerBits)+int(opts.SequenceBits) >= 64 {
+		return fmt.Errorf("%w: worker bits plus sequence bits must be less than 64", ErrInvalidConfig)
+	}
+	if opts.Worker > bitMask(opts.WorkerBits) {
+		return fmt.Errorf("%w: worker %d exceeds max %d", ErrInvalidConfig, opts.Worker, bitMask(opts.WorkerBits))
+	}
+	if opts.MaxClockBackward < 0 {
+		return fmt.Errorf("%w: max clock backward cannot be negative", ErrInvalidConfig)
+	}
+	if opts.RetryDelay <= 0 {
+		return fmt.Errorf("%w: retry delay must be positive", ErrInvalidConfig)
+	}
+	if opts.MaxBatchSize <= 0 {
+		return fmt.Errorf("%w: max batch size must be positive", ErrInvalidConfig)
+	}
+	return nil
+}
+
+// Next 返回一个唯一 ID。
+func (g *XID) Next(ctx context.Context) (uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	for {
+		elapsedMs, seq, wait, err := g.reserveRange(1)
+		if err != nil {
+			return 0, err
+		}
+		if !wait {
+			return g.compose(elapsedMs, seq), nil
+		}
+		if err = sleep(ctx, g.opts.RetryDelay); err != nil {
+			return 0, err
+		}
+	}
+}
+
+// NextBatch 保留 n 个 ID，并按升序返回。
+func (g *XID) NextBatch(ctx context.Context, n int) ([]uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if n <= 0 {
+		return nil, fmt.Errorf("%w: batch size must be positive", ErrInvalidConfig)
+	}
+	if n > g.opts.MaxBatchSize {
+		return nil, fmt.Errorf("%w: batch size %d exceeds max %d", ErrInvalidConfig, n, g.opts.MaxBatchSize)
+	}
+
+	for {
+		elapsedMs, seq, wait, err := g.reserveRange(n)
+		if err != nil {
 			return nil, err
 		}
-	}
-
-	return x, nil
-}
-
-func (x *XID) DataNode() int64 {
-	return int64(x.node)
-}
-
-func (x *XID) TimeOffset() int64 {
-	return x.timeOffset
-}
-
-func (x *XID) Next() (uint64, error) {
-	x.mu.Lock()
-
-	var second = time.Now().Unix()
-	if second < x.second {
-		x.mu.Unlock()
-		return 0, ErrClockBackwards
-	}
-
-	if x.second == second {
-		x.sequence = (x.sequence + 1) & kMaxSequence
-		if x.sequence == 0 {
-			second = x.nextSecond()
+		if wait {
+			if err = sleep(ctx, g.opts.RetryDelay); err != nil {
+				return nil, err
+			}
+			continue
 		}
-	} else {
-		x.sequence = 0
-	}
-	x.second = second
-	var sequence = x.sequence
-	x.mu.Unlock()
 
-	var elapsed = second - x.timeOffset
-	if elapsed < 0 {
-		return 0, ErrClockBackwards
-	}
-	if uint64(elapsed) > kMaxTime {
-		return 0, ErrTimeOverflow
-	}
-
-	var id = uint64(elapsed)<<kTimeShift | (x.node << kDataNodeShift) | sequence
-	return id, nil
-}
-
-func (x *XID) MustNext() uint64 {
-	var id, err = x.Next()
-	if err != nil {
-		panic(err)
-	}
-	return id
-}
-
-func (x *XID) nextSecond() int64 {
-	for {
-		var now = time.Now()
-		var second = now.Unix()
-		if second > x.second {
-			return second
+		ids := make([]uint64, 0, n)
+		for len(ids) < n {
+			ids = append(ids, g.compose(elapsedMs, seq))
+			seq++
+			if seq > g.sequenceMask {
+				seq = 0
+				elapsedMs++
+			}
 		}
-		var sleep = time.Until(time.Unix(x.second+1, 0))
-		if sleep > 10*time.Millisecond {
-			sleep = 10 * time.Millisecond
-		}
-		if sleep <= 0 {
-			sleep = time.Millisecond
-		}
-		time.Sleep(sleep)
+		return ids, nil
 	}
 }
 
-// Time 获取 id 的时间，单位是 second
-func Time(s uint64) int64 {
-	return int64(s >> kTimeShift)
+func (g *XID) reserveRange(n int) (uint64, uint64, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	if now < g.opts.Epoch.UnixMilli() {
+		return 0, 0, false, fmt.Errorf("%w: current time is before epoch", ErrClockBackward)
+	}
+	if g.lastMs >= 0 && now < g.lastMs {
+		backward := time.Duration(g.lastMs-now) * time.Millisecond
+		if backward > g.opts.MaxClockBackward {
+			return 0, 0, false, fmt.Errorf("%w: now=%d last_timestamp=%d", ErrClockBackward, now, g.lastMs)
+		}
+		now = g.lastMs
+	}
+
+	startMs := now
+	startSeq := uint64(0)
+	if now == g.lastMs {
+		startSeq = g.lastSeq + 1
+		if startSeq > g.sequenceMask {
+			startMs = g.lastMs + 1
+			startSeq = 0
+		}
+	}
+
+	finalOffset := startSeq + uint64(n) - 1
+	finalMs := startMs + int64(finalOffset/(g.sequenceMask+1))
+	finalSeq := finalOffset % (g.sequenceMask + 1)
+
+	if finalMs > time.Now().UnixMilli()+int64(g.opts.MaxClockBackward/time.Millisecond) {
+		return 0, 0, true, nil
+	}
+
+	startElapsed := startMs - g.opts.Epoch.UnixMilli()
+	finalElapsed := finalMs - g.opts.Epoch.UnixMilli()
+	if startElapsed < 0 {
+		return 0, 0, false, fmt.Errorf("%w: current time is before epoch", ErrClockBackward)
+	}
+	if uint64(finalElapsed) > g.timestampMask {
+		return 0, 0, false, fmt.Errorf("%w: elapsed milliseconds %d exceeds %d bits", ErrTimeOverflow, finalElapsed, g.timestampBits)
+	}
+
+	g.lastMs = finalMs
+	g.lastSeq = finalSeq
+
+	return uint64(startElapsed), startSeq, false, nil
 }
 
-// DataNode 获取 id 的数据节点标识
-func DataNode(s uint64) int64 {
-	return int64(s & kDataNodeMask >> kDataNodeShift)
+func (g *XID) compose(elapsedMs, seq uint64) uint64 {
+	return (elapsedMs << (g.opts.WorkerBits + g.opts.SequenceBits)) |
+		(g.worker << g.workerShift) |
+		seq
 }
 
-// Sequence 获取 id 的序列号
-func Sequence(s uint64) int64 {
-	return int64(s & kMaxSequence)
+// Worker 返回配置的 worker 标识。
+func (g *XID) Worker() uint64 {
+	return g.worker
 }
 
-var shared *XID
-
-func Next() (uint64, error) {
-	return shared.Next()
+// Time 返回 id 中按当前生成器布局解析出的已过毫秒数。
+// 加上 Epoch 可得到实际生成时间。
+func (g *XID) Time(id uint64) int64 {
+	return int64(id >> (g.opts.WorkerBits + g.opts.SequenceBits))
 }
 
-func MustNext() uint64 {
-	return shared.MustNext()
+// CreatedAt 返回 id 中按当前生成器布局解析出的实际生成时间。
+func (g *XID) CreatedAt(id uint64) time.Time {
+	return g.opts.Epoch.Add(time.Duration(g.Time(id)) * time.Millisecond)
 }
 
-func Default() *XID {
-	return shared
+// WorkerOf 返回 id 中按当前生成器布局解析出的 worker 段。
+func (g *XID) WorkerOf(id uint64) uint64 {
+	return (id >> g.workerShift) & g.workerMax
 }
 
-func init() {
-	shared, _ = New()
+// Sequence 返回 id 中按当前生成器布局解析出的序列号段。
+func (g *XID) Sequence(id uint64) uint64 {
+	return id & g.sequenceMask
+}
+
+func bitMask(bits uint8) uint64 {
+	return (uint64(1) << bits) - 1
+}
+
+func sleep(ctx context.Context, delay time.Duration) error {
+	var timer = time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

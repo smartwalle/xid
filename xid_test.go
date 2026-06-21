@@ -2,9 +2,10 @@ package xid_test
 
 import (
 	"fmt"
-	"github.com/smartwalle/xid"
 	"testing"
 	"time"
+
+	"github.com/smartwalle/xid"
 )
 
 func TestXID_Next(t *testing.T) {

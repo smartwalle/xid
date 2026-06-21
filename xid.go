@@ -103,7 +103,7 @@ func (x *XID) Next() uint64 {
 	if x.second == second {
 		x.sequence = (x.sequence + 1) & kMaxSequence
 		if x.sequence == 0 {
-			second = x.getNextSecond()
+			second = x.nextSecond()
 		}
 	} else {
 		x.sequence = 0
@@ -116,12 +116,22 @@ func (x *XID) Next() uint64 {
 	return id
 }
 
-func (x *XID) getNextSecond() int64 {
-	var second = time.Now().Unix()
-	for second < x.second {
-		second = time.Now().Unix()
+func (x *XID) nextSecond() int64 {
+	for {
+		var now = time.Now()
+		var second = now.Unix()
+		if second > x.second {
+			return second
+		}
+		var sleep = time.Until(time.Unix(x.second+1, 0))
+		if sleep > 10*time.Millisecond {
+			sleep = 10 * time.Millisecond
+		}
+		if sleep <= 0 {
+			sleep = time.Millisecond
+		}
+		time.Sleep(sleep)
 	}
-	return second
 }
 
 // Time 获取 id 的时间，单位是 second

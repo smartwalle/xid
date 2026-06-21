@@ -16,9 +16,11 @@ import (
 const (
 	kSequenceBits uint8 = 21 // 序列号占用的位数
 	kDataNodeBits uint8 = 10 // 数据节点占用的位数
+	kTimeBits     uint8 = 64 - kDataNodeBits - kSequenceBits
 
 	kMaxSequence = ^uint64(0) >> (64 - kSequenceBits) // 序列号最大值，存储范围为 0-2097151
 	kMaxDataNode = ^uint64(0) >> (64 - kDataNodeBits) // 数据节点最大值，存储范围为 0-1023
+	kMaxTime     = ^uint64(0) >> (64 - kTimeBits)     // 时间戳最大值，存储范围为 0-8589934591
 
 	kTimeShift     = kDataNodeBits + kSequenceBits // 时间戳向左的偏移量
 	kDataNodeShift = kSequenceBits                 // 数据节点向左的偏移量
@@ -31,7 +33,10 @@ const (
 )
 
 var (
-	ErrDataNodeNotAllowed = errors.New(fmt.Sprintf("xid: data node can't be greater than %d or less than 0", kMaxDataNode))
+	ErrDataNodeNotAllowed   = errors.New(fmt.Sprintf("xid: data node can't be greater than %d or less than 0", kMaxDataNode))
+	ErrTimeOffsetNotAllowed = errors.New(fmt.Sprintf("xid: time offset can't be after current time or make timestamp greater than %d", kMaxTime))
+	ErrTimeOverflow         = errors.New(fmt.Sprintf("xid: timestamp can't be greater than %d", kMaxTime))
+	ErrClockBackwards       = errors.New("xid: clock moved backwards")
 )
 
 type Option func(*XID) error
@@ -53,7 +58,12 @@ func WithTimeOffset(t time.Time) Option {
 		if t.IsZero() {
 			return nil
 		}
-		x.timeOffset = t.Unix()
+		var now = time.Now().Unix()
+		var offset = t.Unix()
+		if offset > now || uint64(now-offset) > kMaxTime {
+			return ErrTimeOffsetNotAllowed
+		}
+		x.timeOffset = offset
 		return nil
 	}
 }
@@ -91,13 +101,13 @@ func (x *XID) TimeOffset() int64 {
 	return x.timeOffset
 }
 
-func (x *XID) Next() uint64 {
+func (x *XID) Next() (uint64, error) {
 	x.mu.Lock()
 
 	var second = time.Now().Unix()
 	if second < x.second {
 		x.mu.Unlock()
-		return ^uint64(0)
+		return 0, ErrClockBackwards
 	}
 
 	if x.second == second {
@@ -112,7 +122,23 @@ func (x *XID) Next() uint64 {
 	var sequence = x.sequence
 	x.mu.Unlock()
 
-	var id = uint64(second-x.timeOffset)<<kTimeShift | (x.node << kDataNodeShift) | sequence
+	var elapsed = second - x.timeOffset
+	if elapsed < 0 {
+		return 0, ErrClockBackwards
+	}
+	if uint64(elapsed) > kMaxTime {
+		return 0, ErrTimeOverflow
+	}
+
+	var id = uint64(elapsed)<<kTimeShift | (x.node << kDataNodeShift) | sequence
+	return id, nil
+}
+
+func (x *XID) MustNext() uint64 {
+	var id, err = x.Next()
+	if err != nil {
+		panic(err)
+	}
 	return id
 }
 
@@ -151,8 +177,12 @@ func Sequence(s uint64) int64 {
 
 var shared *XID
 
-func Next() uint64 {
+func Next() (uint64, error) {
 	return shared.Next()
+}
+
+func MustNext() uint64 {
+	return shared.MustNext()
 }
 
 func Default() *XID {

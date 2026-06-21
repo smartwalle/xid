@@ -1,12 +1,14 @@
-package xid
+package xid_test
 
 import (
 	"context"
 	"testing"
+
+	"github.com/smartwalle/xid"
 )
 
 func BenchmarkGeneratorNext(b *testing.B) {
-	g, err := New()
+	g, err := xid.New()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -28,7 +30,7 @@ func BenchmarkPackageNext(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := Next(ctx); err != nil {
+		if _, err := xid.Next(ctx); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -37,7 +39,7 @@ func BenchmarkPackageNext(b *testing.B) {
 func BenchmarkGeneratorNextBatch(b *testing.B) {
 	const batchSize = 100
 
-	g, err := New(WithMaxBatchSize(batchSize))
+	g, err := xid.New(xid.WithMaxBatchSize(batchSize))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func BenchmarkGeneratorNextBatch(b *testing.B) {
 }
 
 func BenchmarkGeneratorNextParallel(b *testing.B) {
-	g, err := New()
+	g, err := xid.New()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -65,8 +67,8 @@ func BenchmarkGeneratorNextParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := g.Next(ctx); err != nil {
-				b.Fatal(err)
+			if _, nErr := g.Next(ctx); nErr != nil {
+				b.Fatal(nErr)
 			}
 		}
 	})

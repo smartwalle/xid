@@ -33,10 +33,10 @@ const (
 )
 
 var (
-	ErrDataNodeNotAllowed   = errors.New(fmt.Sprintf("xid: data node can't be greater than %d or less than 0", kMaxDataNode))
-	ErrTimeOffsetNotAllowed = errors.New(fmt.Sprintf("xid: time offset can't be after current time or make timestamp greater than %d", kMaxTime))
-	ErrTimeOverflow         = errors.New(fmt.Sprintf("xid: timestamp can't be greater than %d", kMaxTime))
-	ErrClockBackwards       = errors.New("xid: clock moved backwards")
+	ErrDataNodeNotAllowed   = errors.New(fmt.Sprintf("data node can't be greater than %d or less than 0", kMaxDataNode))
+	ErrTimeOffsetNotAllowed = errors.New(fmt.Sprintf("time offset can't be after current time or make timestamp greater than %d", kMaxTime))
+	ErrTimeOverflow         = errors.New(fmt.Sprintf("timestamp can't be greater than %d", kMaxTime))
+	ErrClockBackwards       = errors.New("clock moved backwards")
 )
 
 type Option func(*XID) error

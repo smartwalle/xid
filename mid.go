@@ -26,7 +26,7 @@ type MID string
 func MIDHex(s string) MID {
 	d, err := hex.DecodeString(s)
 	if err != nil || len(d) != kMidLen {
-		panic(fmt.Sprintf("MID: invalid input to MIDHex: %q", s))
+		panic(fmt.Sprintf("invalid input to MIDHex: %q", s))
 	}
 	return MID(d)
 }
@@ -47,9 +47,9 @@ func readRandomUint32() uint32 {
 	var b [4]byte
 	_, err := io.ReadFull(rand.Reader, b[:])
 	if err != nil {
-		panic(fmt.Errorf("MID: cannot read random number: %v", err))
+		panic(fmt.Errorf("cannot read random number: %v", err))
 	}
-	return uint32((uint32(b[0]) << 0) | (uint32(b[1]) << 8) | (uint32(b[2]) << 16) | (uint32(b[3]) << 24))
+	return (uint32(b[0]) << 0) | (uint32(b[1]) << 8) | (uint32(b[2]) << 16) | (uint32(b[3]) << 24)
 }
 
 func readMachineId() []byte {
@@ -59,7 +59,7 @@ func readMachineId() []byte {
 	if err1 != nil {
 		_, err2 := io.ReadFull(rand.Reader, id)
 		if err2 != nil {
-			panic(fmt.Errorf("MID: cannot get hostname: %v; %v", err1, err2))
+			panic(fmt.Errorf("cannot get hostname: %v; %v", err1, err2))
 		}
 		return id
 	}
@@ -116,14 +116,14 @@ func (m *MID) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	if len(data) != kMidHexLen+2 || data[0] != '"' || data[kMidHexLen+1] != '"' {
-		return errors.New(fmt.Sprintf("MID: invalid MID in JSON: %s", string(data)))
+		return errors.New(fmt.Sprintf("invalid MID in JSON: %s", string(data)))
 	}
 	var buf [kMidLen]byte
 	_, err := hex.Decode(buf[:], data[1:kMidHexLen+1])
 	if err != nil {
-		return errors.New(fmt.Sprintf("MID: invalid MID in JSON: %s (%s)", string(data), err))
+		return errors.New(fmt.Sprintf("invalid MID in JSON: %s (%s)", string(data), err))
 	}
-	*m = MID(string(buf[:]))
+	*m = MID(buf[:])
 	return nil
 }
 
@@ -137,12 +137,12 @@ func (m *MID) UnmarshalText(data []byte) error {
 		return nil
 	}
 	if len(data) != kMidHexLen {
-		return fmt.Errorf("MID: invalid MID: %s", data)
+		return fmt.Errorf("invalid MID: %s", data)
 	}
 	var buf [kMidLen]byte
 	_, err := hex.Decode(buf[:], data[:])
 	if err != nil {
-		return fmt.Errorf("MID: invalid MID: %s (%s)", data, err)
+		return fmt.Errorf("invalid MID: %s (%s)", data, err)
 	}
 	*m = MID(string(buf[:]))
 	return nil
@@ -162,7 +162,7 @@ func (m *MID) Scan(value interface{}) (err error) {
 	case nil:
 		return nil
 	default:
-		return fmt.Errorf("MID: scanning unsupported type: %T", value)
+		return fmt.Errorf("scanning unsupported type: %T", value)
 	}
 }
 
@@ -172,7 +172,7 @@ func (m MID) Valid() bool {
 
 func (m MID) byteSlice(start, end int) []byte {
 	if len(m) != kMidLen {
-		panic(fmt.Sprintf("MID: invalid MID: %q", string(m)))
+		panic(fmt.Sprintf("invalid MID: %q", string(m)))
 	}
 	return []byte(string(m)[start:end])
 }

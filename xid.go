@@ -106,11 +106,10 @@ func WithMaxBatchSize(n int) Option {
 type XID struct {
 	opts Options
 
-	mu        sync.Mutex
-	lastMs    int64
-	lastSeq   uint64
-	worker    uint64
-	workerMax uint64
+	mu      sync.Mutex
+	lastMs  int64
+	lastSeq uint64
+	worker  uint64
 
 	workerShift   uint8
 	timestampBits uint8
@@ -148,7 +147,6 @@ func New(options ...Option) (*XID, error) {
 		lastMs:        -1,
 		lastSeq:       0,
 		worker:        opts.Worker,
-		workerMax:     bitMask(opts.WorkerBits),
 		workerShift:   opts.SequenceBits,
 		timestampBits: timestampBits,
 		sequenceMask:  bitMask(opts.SequenceBits),
@@ -295,32 +293,6 @@ func (g *XID) compose(elapsedMs, seq uint64) uint64 {
 	return (elapsedMs << (g.opts.WorkerBits + g.opts.SequenceBits)) |
 		(g.worker << g.workerShift) |
 		seq
-}
-
-// Worker 返回配置的 worker 标识。
-func (g *XID) Worker() uint64 {
-	return g.worker
-}
-
-// Time 返回 id 中按当前生成器布局解析出的已过毫秒数。
-// 加上 Epoch 可得到实际生成时间。
-func (g *XID) Time(id uint64) int64 {
-	return int64(id >> (g.opts.WorkerBits + g.opts.SequenceBits))
-}
-
-// CreatedAt 返回 id 中按当前生成器布局解析出的实际生成时间。
-func (g *XID) CreatedAt(id uint64) time.Time {
-	return g.opts.Epoch.Add(time.Duration(g.Time(id)) * time.Millisecond)
-}
-
-// WorkerOf 返回 id 中按当前生成器布局解析出的 worker 段。
-func (g *XID) WorkerOf(id uint64) uint64 {
-	return (id >> g.workerShift) & g.workerMax
-}
-
-// Sequence 返回 id 中按当前生成器布局解析出的序列号段。
-func (g *XID) Sequence(id uint64) uint64 {
-	return id & g.sequenceMask
 }
 
 func bitMask(bits uint8) uint64 {

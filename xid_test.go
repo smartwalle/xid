@@ -7,6 +7,12 @@ import (
 	"github.com/smartwalle/xid"
 )
 
+func TestXID_Next(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		t.Log(xid.Next(context.Background()))
+	}
+}
+
 func BenchmarkGeneratorNext(b *testing.B) {
 	g, err := xid.New()
 	if err != nil {
